@@ -27,35 +27,50 @@ class TreeConverter:
 
     @staticmethod
     def parse_sklearn_tree(tree_text: str) -> TreeNode:
+        """Parser corregido que no pierde nodos hoja iniciales"""
         lines = [line for line in tree_text.split('\n') if "|---" in line]
         stack = []
         root = None
 
         for line in lines:
+            # Contar nivel basado en la indentación
             level = line.count('|   ')
-            content = line.split('|--- ')[1].strip()
+            content = line.replace("|---", "").strip()
             is_leaf = "class: " in content.lower()
 
+            # Crear nodo (sin limpiar contenido para debug)
             node = TreeNode(
-                content=TreeConverter.clean_content(content),
+                content=content,  # Usamos el contenido crudo primero
                 is_leaf=is_leaf
             )
 
-            # Manejar estructura del árbol
+            # Manejar niveles
             while len(stack) > level:
                 stack.pop()
 
-            if stack:
+            if not stack:
+                if root is None:
+                    root = node  # Primer nodo raíz
+                else:
+                    # Caso especial: hermano del root (raro pero posible)
+                    root.right = node
+            else:
                 parent = stack[-1]
                 if parent.left is None:
                     parent.left = node
                 else:
                     parent.right = node
-            else:
-                root = node
 
             stack.append(node)
 
+        # Ahora limpiar el contenido de todos los nodos
+        def clean_node(node):
+            if node:
+                node.content = TreeConverter.clean_content(node.content)
+                clean_node(node.left)
+                clean_node(node.right)
+
+        clean_node(root)
         return root
 
     @staticmethod
@@ -75,47 +90,54 @@ class TreeConverter:
             return f"[{node.content} {left} {right}]"
 
         return r"""\documentclass[tikz,border=10pt]{standalone}
-    \usepackage[edges]{forest}
-    \usetikzlibrary{arrows.meta}
-
-    \begin{document}
-    \begin{forest}
-    for tree={
-        grow=south,
-        parent anchor=south,
-        child anchor=north,
-        draw,
-        edge={->,>=latex},
-        if n children=0{
-            fill=green!10,
-            rounded corners=3pt,
-            font=\small\bfseries
-        }{
-            fill=blue!5,
-            rounded corners=2pt,
-            font=\small
-        },
-        edge path={
-            \noexpand\path[\forestoption{edge}]
-            (!u.parent anchor) -- +(0,-8pt) -| (.child anchor)\forestoption{edge label};
-        },
-        l sep=20pt,
-        s sep=15pt,
-        tier/.wrap pgfmath arg={tier #1}{level()},
-        where level=0{
-            font=\large\bfseries
-        }{}
-    }
-    """ + build_branches(tree) + r"""
-    \end{forest}
-    \end{document}"""
+        \usepackage[edges]{forest}
+        \usetikzlibrary{arrows.meta}
+    
+        \begin{document}
+        \begin{forest}
+        for tree={
+            grow=south,
+            parent anchor=south,
+            child anchor=north,
+            draw,
+            edge={->,>=latex},
+            if n children=0{
+                fill=green!10,
+                rounded corners=3pt,
+                font=\small\bfseries
+            }{
+                fill=blue!5,
+                rounded corners=2pt,
+                font=\small
+            },
+            edge path={
+                \noexpand\path[\forestoption{edge}]
+                (!u.parent anchor) -- +(0,-8pt) -| (.child anchor)\forestoption{edge label};
+            },
+            l sep=20pt,
+            s sep=15pt,
+            tier/.wrap pgfmath arg={tier #1}{level()},
+            where level=0{
+                font=\large\bfseries
+            }{}
+        }
+        """ + build_branches(tree) + r"""
+        \end{forest}
+        \end{document}"""
 
     @staticmethod
     def convert_to_pdf(tree_text: str, output_dir: str, filename: str) -> str:
         """Conversión completa a PDF con manejo de errores"""
         try:
+
+            print("\n=== TEXTO ORIGINAL DEL ÁRBOL ===")
+            print(tree_text)
+
             tree = TreeConverter.parse_sklearn_tree(tree_text)
             latex_code = TreeConverter.to_vertical_forest(tree)
+
+            print("\n=== ESTRUCTURA DEL ÁRBOL ANALIZADA ===")
+            TreeConverter.print_tree_debug(tree)
 
             # Guardar archivo .tex
             os.makedirs(output_dir, exist_ok=True)
@@ -139,3 +161,16 @@ class TreeConverter:
 
         except Exception as e:
             raise RuntimeError(f"Error generating tree: {str(e)}")
+
+    @staticmethod
+    def print_tree_debug(tree: TreeNode, level: int = 0):
+        """Muestra el árbol con estructura jerárquica en consola"""
+        indent = "    " * level
+        if tree.is_leaf:
+            print(f"{indent}└── [Hoja]: {tree.content.replace('\\textbf{', '').replace('}', '')}")
+        else:
+            print(f"{indent}├── [Decisión]: {tree.content}")
+            if tree.left:
+                TreeConverter.print_tree_debug(tree.left, level + 1)
+            if tree.right:
+                TreeConverter.print_tree_debug(tree.right, level + 1)

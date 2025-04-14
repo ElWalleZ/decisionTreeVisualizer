@@ -8,10 +8,10 @@ import shutil
 import numpy as np
 from PyQt6 import QtWidgets, QtGui
 from PyQt6.QtCore import QSize, Qt
-from PyQt6.QtWidgets import QHBoxLayout, QMessageBox, QComboBox
+from PyQt6.QtWidgets import QHBoxLayout, QMessageBox, QComboBox, QLabel, QPushButton
 from decision_tree_git_que_puso_el_profe import TreeConverter
 
-from model import entrenar_arbol_decision, guardar_modelo
+from model import entrenar_arbol_decision
 from datasets import get_dataset_names, get_dataset, load_custom_dataset
 
 
@@ -69,13 +69,27 @@ class Window(QtWidgets.QWidget):
         self.dataset_combo = QComboBox()
         self.dataset_combo.addItems(['Seleccionar dataset'] + get_dataset_names())
         self.dataset_combo.currentIndexChanged.connect(self.load_selected_dataset)
+        self.dataset_combo.setMinimumSize(QSize(200, 50))
+
 
         self.btn_custom_dataset = QtWidgets.QPushButton("Cargar dataset personalizado")
         self.btn_custom_dataset.clicked.connect(self.load_custom_dataset)
+        self.btn_custom_dataset.setMinimumSize(QSize(200, 50))
 
-        # Botones base (funcionalidad mínima)
-        self.buttonOpen = QtWidgets.QPushButton("Abrir archivo")
-        self.buttonOpen.setMinimumSize(QSize(200, 50))
+
+        #self.buttonOpen = QtWidgets.QPushButton("Abrir archivo")
+        #self.buttonOpen.setMinimumSize(QSize(200, 50))
+
+        self.depthValue = QtWidgets.QSpinBox()
+        self.depthValue.setValue(5)
+        self.depthValue.setMinimum(1)
+        self.depthValue.setMaximum(10)
+        self.depthValue.setFixedSize(70,40)
+
+        self.btn_new_project = QPushButton("Nuevo Proyecto")
+        self.btn_new_project.clicked.connect(self.nuevo_proyecto)
+        self.btn_new_project.setMinimumSize(QSize(200, 50))
+
 
         # Layout principal
         layout = QtWidgets.QGridLayout(self)
@@ -85,17 +99,21 @@ class Window(QtWidgets.QWidget):
         dataset_layout.addWidget(self.dataset_combo)
         dataset_layout.addWidget(self.btn_custom_dataset)
 
-        # Sección de botones base
         button_layout = QHBoxLayout()
-        button_layout.addWidget(self.buttonOpen)
+        label = QLabel("Profundidad:")
+        label.setFixedSize(100,20)
+
+        button_layout.addWidget(label)
+        button_layout.addWidget(self.depthValue)
+        button_layout.addWidget(self.btn_new_project)
+        button_layout.addWidget(self.btn_entrenar)
 
         # Ensamblado final
         layout.addLayout(project_layout, 0, 0, 1, 4)
         layout.addLayout(dataset_layout, 0, 0, 1, 4)
         layout.addLayout(button_layout, 1, 0, 1, 4)
-        layout.addWidget(self.viewer, 2, 0, 1, 2)
-        layout.addWidget(self.viewer2, 2, 2, 1, 2)
-        button_layout.addWidget(self.btn_entrenar)
+        layout.addWidget(self.viewer, 2, 0, 1, 1)
+        layout.addWidget(self.viewer2, 2, 2, 1, 1)
 
 
         self.setWindowTitle("Dataset Manager")
@@ -115,10 +133,11 @@ class Window(QtWidgets.QWidget):
             self.create_project_directory()
 
     def create_project_directory(self):
-        if self.current_project:
-            # Crear directorio si no existe
+        if self.current_project and self.current_project != "Sin nombre":
             self.project_dir = os.path.join(os.getcwd(), "proyectos", self.current_project)
             os.makedirs(self.project_dir, exist_ok=True)
+        else:
+            self.project_dir = None
 
     def load_selected_dataset(self, index):
         if index > 0:
@@ -222,7 +241,7 @@ class Window(QtWidgets.QWidget):
 
         try:
             # 1. Entrenar modelo
-            resultado = entrenar_arbol_decision(self.current_dataset)
+            resultado = entrenar_arbol_decision(self.current_dataset, max_depth= self.depthValue.value())
 
             # 2. Mostrar texto del árbol
             texto_limpio = resultado['texto_arbol'].replace('_', '')
@@ -284,7 +303,7 @@ class Window(QtWidgets.QWidget):
 
             # 4. Guardar resultados
             if self.project_dir:
-                guardar_modelo(resultado['modelo'], self.project_dir)
+                #guardar_modelo(resultado['modelo'], self.project_dir)
                 with open(os.path.join(self.project_dir, 'arbol.txt'), 'w') as f:
                     f.write(texto_limpio)
                 if img_path:
@@ -304,75 +323,34 @@ class Window(QtWidgets.QWidget):
         scaled_pixmap = pixmap.scaled(self.viewer2.size(), Qt.AspectRatioMode.KeepAspectRatio)
         self.viewer2.setPixmap(scaled_pixmap)
 
-    # def guardar_resultados_completos(self, resultado, img_path):
-    #     # Guardar modelo
-    #     guardar_modelo(resultado['modelo'], self.project_dir)
-    #
-    #     # Guardar texto
-    #     with open(os.path.join(self.project_dir, 'arbol.txt'), 'w') as f:
-    #         f.write(resultado['texto_arbol'])
-    #
-    #     # Guardar imagen en proyecto
-    #     if img_path:
-    #         img_name = os.path.basename(img_path)
-    #         shutil.copy(img_path, os.path.join(self.project_dir, img_name))
+    def nuevo_proyecto(self):
+        new_name, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "Nuevo Proyecto",
+            "Ingrese el nombre del nuevo proyecto:",
+        )
 
-    # def texto_a_latex(self, texto_arbol):
-    #     try:
-    #         return TreeConverter.convert(texto_arbol, package='forest')
-    #     except ValueError as e:
-    #         QMessageBox.critical(self, "Error", str(e))
-    #         return ""
+        if ok and new_name:
+            # Resetear todos los valores del proyecto actual
+            self.current_project = new_name.strip()
+            self.current_dataset = None
+            self.current_dataset_name = ""
+            self.modelo = None
 
-    # def generar_pdf_y_imagen(self, tex_code, output_dir, nombre):
-    #     os.makedirs(output_dir, exist_ok=True)
-    #     tex_path = os.path.join(output_dir, f"{nombre}.tex")
-    #
-    #     try:
-    #         with open(tex_path, 'w', encoding='utf-8') as f:
-    #             f.write(tex_code)
-    #
-    #         # Compilar con pdflatex (2 veces para referencias cruzadas)
-    #         for _ in range(2):
-    #             result = subprocess.run(
-    #                 ["pdflatex", "-interaction=nonstopmode", f"{nombre}.tex"],
-    #                 cwd=output_dir,
-    #                 stdout=subprocess.PIPE,
-    #                 stderr=subprocess.PIPE,
-    #                 timeout=30
-    #             )
-    #             if result.returncode != 0:
-    #                 error = result.stderr.decode('utf-8', errors='ignore')
-    #                 raise RuntimeError(f"LaTeX error: {error[:500]}")
-    #
-    #         # Convertir a imagen
-    #         pdf_path = os.path.join(output_dir, f"{nombre}.pdf")
-    #         img_path = os.path.join(output_dir, f"{nombre}.png")
-    #
-    #         subprocess.run(
-    #             ["pdftoppm", "-png", "-singlefile", pdf_path, img_path.replace('.png', '')],
-    #             check=True
-    #         )
-    #
-    #         return img_path if os.path.exists(img_path) else None
-    #
-    #     except Exception as e:
-    #         QMessageBox.critical(self, "Error", f"Error generating PDF: {str(e)}")
-    #         return None
+            # Actualizar UI
+            self.lbl_project.setText(f"Proyecto: {self.current_project}")
+            self.dataset_combo.setCurrentIndex(0)
+            self.viewer.clear()
+            self.viewer2.clear()
 
-    def handleOpen(self):
-        pass
+            # Crear directorio
+            self.create_project_directory()
 
-    def ProcesarImage(self):
-        pass
-
-    def handleSaveFile(self):
-        pass
-
-    def ActualizarPixMap2(self, image):
-        pass
-
-
+            QMessageBox.information(
+                self,
+                "Nuevo Proyecto",
+                f"Proyecto '{self.current_project}' creado!"
+            )
 
 if __name__ == '__main__':
     app = QtWidgets.QApplication(sys.argv)
