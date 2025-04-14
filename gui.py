@@ -221,37 +221,82 @@ class Window(QtWidgets.QWidget):
             return
 
         try:
+            # 1. Entrenar modelo
             resultado = entrenar_arbol_decision(self.current_dataset)
 
-            texto_limpio = resultado['texto_arbol'].replace('_', '')  # Elimina guiones bajos
-            resultado['texto_arbol'] = texto_limpio
-
-            # Construir y mostrar texto del árbol
+            # 2. Mostrar texto del árbol
+            texto_limpio = resultado['texto_arbol'].replace('_', '')
             mensaje = f"""=== Resultados del Modelo ===
                 Tipo: {resultado['tipo'].capitalize()}
                 {resultado['metric_name']}: {resultado['metrica']:.2%}
-            
+
                 === Estructura del Árbol ===
-                {resultado['texto_arbol']}
+                {texto_limpio}
                 """
             self.viewer.setPlainText(mensaje)
 
-            # Generar LaTeX y imagen (NUEVO)
-            latex_code = self.texto_a_latex(resultado['texto_arbol'])
-            output_dir = os.path.join(self.project_dir, "latex_output") if self.project_dir else "latex_output"
-            img_path = self.generar_pdf_y_imagen(latex_code, output_dir, "decision_tree")
+            # 3. Generar y mostrar árbol visual (DIRECTO CON TreeConverter)
+            output_dir = os.path.join(self.project_dir, "output") if self.project_dir else "output"
+            os.makedirs(output_dir, exist_ok=True)
 
-            if img_path:
-                self.mostrar_imagen_arbol(img_path)
+            # Convertir a PDF
+            pdf_path = TreeConverter.convert_to_pdf(
+                texto_limpio,
+                output_dir=output_dir,
+                filename="decision_tree"
+            )
 
-            # Guardar resultados
+            # Convertir PDF a imagen
+            img_path = pdf_path.replace('.pdf', '.png')
+            try:
+                # Opción 1: Usar pdftoppm (más confiable)
+                subprocess.run([
+                    "pdftoppm",
+                    "-png",
+                    "-singlefile",
+                    pdf_path,
+                    os.path.join(output_dir, "temp_tree")
+                ], check=True, capture_output=True)
+
+                # Renombrar el archivo generado
+                temp_img = os.path.join(output_dir, "temp_tree.png")
+                if os.path.exists(temp_img):
+                    os.rename(temp_img, img_path)
+
+                # Opción 2: Si falla, usar convert (ImageMagick)
+                if not os.path.exists(img_path):
+                    subprocess.run([
+                        "convert",
+                        "-density", "300",
+                        pdf_path,
+                        "-quality", "90",
+                        img_path
+                    ], check=True)
+
+            except subprocess.CalledProcessError as e:
+                error_msg = f"Error al convertir PDF a imagen:\n{e.stderr.decode()}"
+                if "pdftoppm" in error_msg:
+                    error_msg += "\n\nInstala poppler-utils con:\nsudo apt-get install poppler-utils"
+                elif "convert" in error_msg:
+                    error_msg += "\n\nInstala ImageMagick con:\nsudo apt-get install imagemagick"
+                QMessageBox.warning(self, "Advertencia", error_msg)
+                return
+
+            # 4. Guardar resultados
             if self.project_dir:
-                self.guardar_resultados_completos(resultado, img_path)
+                guardar_modelo(resultado['modelo'], self.project_dir)
+                with open(os.path.join(self.project_dir, 'arbol.txt'), 'w') as f:
+                    f.write(texto_limpio)
+                if img_path:
+                    shutil.copy(img_path, self.project_dir)
 
+            self.mostrar_imagen_arbol(img_path)
             QMessageBox.information(self, "Éxito", "Modelo entrenado y visualizado!")
 
         except Exception as e:
             error_msg = str(e)
+            if "LaTeX" in error_msg:
+                error_msg += "\n\nAsegúrate de tener instalados:\nsudo apt-get install texlive-latex-extra poppler-utils"
             QMessageBox.critical(self, "Error", error_msg)
 
     def mostrar_imagen_arbol(self, img_path):
@@ -259,61 +304,61 @@ class Window(QtWidgets.QWidget):
         scaled_pixmap = pixmap.scaled(self.viewer2.size(), Qt.AspectRatioMode.KeepAspectRatio)
         self.viewer2.setPixmap(scaled_pixmap)
 
-    def guardar_resultados_completos(self, resultado, img_path):
-        # Guardar modelo
-        guardar_modelo(resultado['modelo'], self.project_dir)
+    # def guardar_resultados_completos(self, resultado, img_path):
+    #     # Guardar modelo
+    #     guardar_modelo(resultado['modelo'], self.project_dir)
+    #
+    #     # Guardar texto
+    #     with open(os.path.join(self.project_dir, 'arbol.txt'), 'w') as f:
+    #         f.write(resultado['texto_arbol'])
+    #
+    #     # Guardar imagen en proyecto
+    #     if img_path:
+    #         img_name = os.path.basename(img_path)
+    #         shutil.copy(img_path, os.path.join(self.project_dir, img_name))
 
-        # Guardar texto
-        with open(os.path.join(self.project_dir, 'arbol.txt'), 'w') as f:
-            f.write(resultado['texto_arbol'])
+    # def texto_a_latex(self, texto_arbol):
+    #     try:
+    #         return TreeConverter.convert(texto_arbol, package='forest')
+    #     except ValueError as e:
+    #         QMessageBox.critical(self, "Error", str(e))
+    #         return ""
 
-        # Guardar imagen en proyecto
-        if img_path:
-            img_name = os.path.basename(img_path)
-            shutil.copy(img_path, os.path.join(self.project_dir, img_name))
-
-    def texto_a_latex(self, texto_arbol):
-        try:
-            return TreeConverter.convert(texto_arbol, package='forest')
-        except ValueError as e:
-            QMessageBox.critical(self, "Error", str(e))
-            return ""
-
-    def generar_pdf_y_imagen(self, tex_code, output_dir, nombre):
-        os.makedirs(output_dir, exist_ok=True)
-        tex_path = os.path.join(output_dir, f"{nombre}.tex")
-
-        try:
-            with open(tex_path, 'w', encoding='utf-8') as f:
-                f.write(tex_code)
-
-            # Compilar con pdflatex (2 veces para referencias cruzadas)
-            for _ in range(2):
-                result = subprocess.run(
-                    ["pdflatex", "-interaction=nonstopmode", f"{nombre}.tex"],
-                    cwd=output_dir,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    timeout=30
-                )
-                if result.returncode != 0:
-                    error = result.stderr.decode('utf-8', errors='ignore')
-                    raise RuntimeError(f"LaTeX error: {error[:500]}")
-
-            # Convertir a imagen
-            pdf_path = os.path.join(output_dir, f"{nombre}.pdf")
-            img_path = os.path.join(output_dir, f"{nombre}.png")
-
-            subprocess.run(
-                ["pdftoppm", "-png", "-singlefile", pdf_path, img_path.replace('.png', '')],
-                check=True
-            )
-
-            return img_path if os.path.exists(img_path) else None
-
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error generating PDF: {str(e)}")
-            return None
+    # def generar_pdf_y_imagen(self, tex_code, output_dir, nombre):
+    #     os.makedirs(output_dir, exist_ok=True)
+    #     tex_path = os.path.join(output_dir, f"{nombre}.tex")
+    #
+    #     try:
+    #         with open(tex_path, 'w', encoding='utf-8') as f:
+    #             f.write(tex_code)
+    #
+    #         # Compilar con pdflatex (2 veces para referencias cruzadas)
+    #         for _ in range(2):
+    #             result = subprocess.run(
+    #                 ["pdflatex", "-interaction=nonstopmode", f"{nombre}.tex"],
+    #                 cwd=output_dir,
+    #                 stdout=subprocess.PIPE,
+    #                 stderr=subprocess.PIPE,
+    #                 timeout=30
+    #             )
+    #             if result.returncode != 0:
+    #                 error = result.stderr.decode('utf-8', errors='ignore')
+    #                 raise RuntimeError(f"LaTeX error: {error[:500]}")
+    #
+    #         # Convertir a imagen
+    #         pdf_path = os.path.join(output_dir, f"{nombre}.pdf")
+    #         img_path = os.path.join(output_dir, f"{nombre}.png")
+    #
+    #         subprocess.run(
+    #             ["pdftoppm", "-png", "-singlefile", pdf_path, img_path.replace('.png', '')],
+    #             check=True
+    #         )
+    #
+    #         return img_path if os.path.exists(img_path) else None
+    #
+    #     except Exception as e:
+    #         QMessageBox.critical(self, "Error", f"Error generating PDF: {str(e)}")
+    #         return None
 
     def handleOpen(self):
         pass

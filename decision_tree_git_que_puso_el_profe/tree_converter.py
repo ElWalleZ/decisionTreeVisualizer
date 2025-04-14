@@ -1,4 +1,5 @@
-import re
+import re, os
+import subprocess
 from dataclasses import dataclass
 from typing import Optional
 
@@ -14,12 +15,14 @@ class TreeNode:
 class TreeConverter:
     @staticmethod
     def clean_content(content: str) -> str:
-        """Limpia y escapa caracteres especiales para LaTeX"""
-        # Escapa caracteres especiales
+        """Limpia y formatea el contenido para LaTeX"""
         content = content.replace("_", r"\_")
-        content = content.replace("<=", r"$\leq$").replace(">", r"$>$")
-        # Elimina espacios problemáticos
+        content = content.replace("<=", r" $\leq$ ").replace(">", r" $>$ ")
         content = re.sub(r"\s+", " ", content).strip()
+
+        # Formato especial para nodos hoja
+        if "class: " in content.lower():
+            content = r"\textbf{" + content.replace("class: ", "").strip() + "}"
         return content
 
     @staticmethod
@@ -31,16 +34,14 @@ class TreeConverter:
         for line in lines:
             level = line.count('|   ')
             content = line.split('|--- ')[1].strip()
+            is_leaf = "class: " in content.lower()
 
-            # Formatea el contenido
-            is_leaf = "class: " in content
-            if is_leaf:
-                content = f"Class: {content.split('class: ')[1]}"
-            content = TreeConverter.clean_content(content)
+            node = TreeNode(
+                content=TreeConverter.clean_content(content),
+                is_leaf=is_leaf
+            )
 
-            node = TreeNode(content=content, is_leaf=is_leaf)
-
-            # Maneja la estructura del árbol
+            # Manejar estructura del árbol
             while len(stack) > level:
                 stack.pop()
 
@@ -58,75 +59,83 @@ class TreeConverter:
         return root
 
     @staticmethod
-    def to_qtree_latex(root: TreeNode) -> str:
-        """Genera código LaTeX usando qtree"""
+    def to_vertical_forest(tree: TreeNode) -> str:
+        """Genera árbol vertical con mejor espaciado"""
 
-        def build_qtree(node: TreeNode, depth: int = 0) -> str:
-            if node is None:
-                return ""
-
-            indent = "  " * depth
-            if node.is_leaf:
-                return f"{indent}[.{node.content} ]\n"
-
-            left = build_qtree(node.left, depth + 1)
-            right = build_qtree(node.right, depth + 1)
-            return f"{indent}[.{node.content}\n{left}{right}{indent}]\n"
-
-        return r"""\documentclass[border=5pt]{standalone}
-        \usepackage{qtree}
-        \begin{document}
-        \Tree
-        """ + build_qtree(root) + r"""\end{document}"""
-
-    @staticmethod
-    def to_forest_latex(root: TreeNode) -> str:
-        """Genera código LaTeX usando forest"""
-
-        def build_forest(node: TreeNode) -> str:
+        def build_branches(node: TreeNode) -> str:
             if node is None:
                 return ""
 
             if node.is_leaf:
                 return f"[\\textbf{{{node.content}}}]"
 
-            left = build_forest(node.left)
-            right = build_forest(node.right)
+            left = build_branches(node.left)
+            right = build_branches(node.right)
+
             return f"[{node.content} {left} {right}]"
 
-        return r"""\documentclass[tikz,border=5pt]{standalone}
-        \usepackage[edges]{forest}
-        \usetikzlibrary{arrows.meta}
-        
-        \begin{document}
-        \begin{forest}
-        for tree={
-            grow'=east,
-            draw,
-            edge path={
-                \noexpand\path[\forestoption{edge}]
-                (!u.parent anchor) -- +(5pt,0) |- (.child anchor)\forestoption{edge label};
-            },
-            if n children=0{
-                fill=gray!20,
-                rectangle,
-                rounded corners=2pt
-            }{},
-            font=\small,
-            s sep=10pt,
-            l sep=15pt
-        }
-        """ + build_forest(root) + r"""
-        \end{forest}
-        \end{document}"""
+        return r"""\documentclass[tikz,border=10pt]{standalone}
+    \usepackage[edges]{forest}
+    \usetikzlibrary{arrows.meta}
+
+    \begin{document}
+    \begin{forest}
+    for tree={
+        grow=south,
+        parent anchor=south,
+        child anchor=north,
+        draw,
+        edge={->,>=latex},
+        if n children=0{
+            fill=green!10,
+            rounded corners=3pt,
+            font=\small\bfseries
+        }{
+            fill=blue!5,
+            rounded corners=2pt,
+            font=\small
+        },
+        edge path={
+            \noexpand\path[\forestoption{edge}]
+            (!u.parent anchor) -- +(0,-8pt) -| (.child anchor)\forestoption{edge label};
+        },
+        l sep=20pt,
+        s sep=15pt,
+        tier/.wrap pgfmath arg={tier #1}{level()},
+        where level=0{
+            font=\large\bfseries
+        }{}
+    }
+    """ + build_branches(tree) + r"""
+    \end{forest}
+    \end{document}"""
 
     @staticmethod
-    def convert(tree_text: str, package: str = 'forest') -> str:
-        """Conversión completa con manejo de errores"""
+    def convert_to_pdf(tree_text: str, output_dir: str, filename: str) -> str:
+        """Conversión completa a PDF con manejo de errores"""
         try:
             tree = TreeConverter.parse_sklearn_tree(tree_text)
-            if package == 'forest':
-                return TreeConverter.to_forest_latex(tree)
-            return TreeConverter.to_qtree_latex(tree)
+            latex_code = TreeConverter.to_vertical_forest(tree)
+
+            # Guardar archivo .tex
+            os.makedirs(output_dir, exist_ok=True)
+            tex_path = os.path.join(output_dir, f"{filename}.tex")
+
+            with open(tex_path, 'w', encoding='utf-8') as f:
+                f.write(latex_code)
+
+            # Compilar
+            for _ in range(2):  # Compilar 2 veces para referencias
+                result = subprocess.run(
+                    ["pdflatex", "-interaction=nonstopmode", tex_path],
+                    cwd=output_dir,
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(result.stderr)
+
+            return os.path.join(output_dir, f"{filename}.pdf")
+
         except Exception as e:
-            raise ValueError(f"Error converting tree: {str(e)}")
+            raise RuntimeError(f"Error generating tree: {str(e)}")
