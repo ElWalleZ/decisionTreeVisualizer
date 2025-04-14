@@ -9,12 +9,7 @@ import numpy as np
 from PyQt6 import QtWidgets, QtGui
 from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtWidgets import QHBoxLayout, QMessageBox, QComboBox
-from pathlib import Path
-from sklearn.exceptions import NotFittedError
-from decision_tree_git_que_puso_el_profe import TreeGenerator
-from decision_tree_git_que_puso_el_profe import Stack
-from decision_tree_git_que_puso_el_profe.extra import Comparison, State
-from decision_tree_git_que_puso_el_profe.latex import LatexTree, LatexNode
+from decision_tree_git_que_puso_el_profe import TreeConverter
 
 from model import entrenar_arbol_decision, guardar_modelo
 from datasets import get_dataset_names, get_dataset, load_custom_dataset
@@ -244,7 +239,7 @@ class Window(QtWidgets.QWidget):
             # Generar LaTeX y imagen (NUEVO)
             latex_code = self.texto_a_latex(resultado['texto_arbol'])
             output_dir = os.path.join(self.project_dir, "latex_output") if self.project_dir else "latex_output"
-            img_path = self.generar_pdf_y_imagen(latex_code, output_dir, "arbol_decision")
+            img_path = self.generar_pdf_y_imagen(latex_code, output_dir, "decision_tree")
 
             if img_path:
                 self.mostrar_imagen_arbol(img_path)
@@ -278,108 +273,47 @@ class Window(QtWidgets.QWidget):
             shutil.copy(img_path, os.path.join(self.project_dir, img_name))
 
     def texto_a_latex(self, texto_arbol):
+        try:
+            return TreeConverter.convert(texto_arbol, package='forest')
+        except ValueError as e:
+            QMessageBox.critical(self, "Error", str(e))
+            return ""
 
-        lineas = [linea for linea in texto_arbol.split("\n") if linea.strip() != ""]
-        stack = []  # Para rastrear nodos padres
-        root_node = None
-
-        for linea in lineas:
-            nivel = linea.count("|   ")  # Determina la profundidad
-            linea_limpia = linea.replace("|---", "").strip()
-
-            # Manejar nodos de decisión y hojas
-            if "class: " in linea_limpia:  # Nodo hoja
-                clase = linea_limpia.split("class: ")[1]
-                comp = Comparison("Clase", "==", clase)
-                is_leaf = True
-            else:  # Nodo de decisión
-                if "<=" in linea_limpia:
-                    feature, valor = linea_limpia.split(" <= ")
-                    comp = Comparison(feature, "<=", valor)
-                elif ">" in linea_limpia:
-                    feature, valor = linea_limpia.split(" > ")
-                    comp = Comparison(feature, ">", valor)
-                else:
-                    continue  # Saltar líneas no reconocidas
-                is_leaf = False
-
-            # Crear nodo LaTeX
-            node = LatexNode(
-                val=str(comp),
-                is_leaf=is_leaf,
-                is_left=True  # Asumir izquierda por defecto
-            )
-
-            # Manejar jerarquía
-            while len(stack) > nivel:
-                stack.pop()
-
-            if not stack:  # Nodo raíz
-                root_node = node
-            else:
-                parent = stack[-1]
-                if parent.left is None:
-                    parent.left = node
-                else:
-                    parent.right = node
-
-            stack.append(node)
-
-        latex_tree = LatexTree()
-        latex_tree.root = root_node
-        return latex_tree.render()
-
-    def generar_pdf_y_imagen(self, tex_code, output_dir="output_arbol", nombre="arbol"):
-
+    def generar_pdf_y_imagen(self, tex_code, output_dir, nombre):
         os.makedirs(output_dir, exist_ok=True)
-
         tex_path = os.path.join(output_dir, f"{nombre}.tex")
-        pdf_path = os.path.join(output_dir, f"{nombre}.pdf")
-        img_path = os.path.join(output_dir, f"{nombre}.png")
-
-        with open(tex_path, "w", encoding="utf-8") as f:
-            f.write(tex_code)
-
-        # Ejecutar pdflatex y capturar salida
 
         try:
+            with open(tex_path, 'w', encoding='utf-8') as f:
+                f.write(tex_code)
 
-            result = subprocess.run(
-                ["pdflatex", "-interaction=nonstopmode", f"{nombre}.tex"],  # <-- SOLO EL NOMBRE DEL ARCHIVO
-                cwd=output_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=10,
+            # Compilar con pdflatex (2 veces para referencias cruzadas)
+            for _ in range(2):
+                result = subprocess.run(
+                    ["pdflatex", "-interaction=nonstopmode", f"{nombre}.tex"],
+                    cwd=output_dir,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=30
+                )
+                if result.returncode != 0:
+                    error = result.stderr.decode('utf-8', errors='ignore')
+                    raise RuntimeError(f"LaTeX error: {error[:500]}")
 
-            )
+            # Convertir a imagen
+            pdf_path = os.path.join(output_dir, f"{nombre}.pdf")
+            img_path = os.path.join(output_dir, f"{nombre}.png")
 
-            if result.returncode != 0 or not os.path.exists(pdf_path):
-                log = result.stdout.decode(errors="ignore")
-                QMessageBox.critical(self, "Error de LaTeX", f"No se pudo compilar el archivo .tex:\n\n{log[:1000]}")
-                return None
-        except FileNotFoundError:
-            QMessageBox.critical(self, "Error", "No se encontró 'pdflatex'.")
-            return None
-        except subprocess.TimeoutExpired:
-
-            QMessageBox.critical(self, "Error", "La compilación excedió el tiempo límite.")
-
-            return None
-
-        # Convertir PDF a imagen
-        try:
             subprocess.run(
-                ["pdftoppm", pdf_path, os.path.join(output_dir, nombre), "-png", "-singlefile"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=10
+                ["pdftoppm", "-png", "-singlefile", pdf_path, img_path.replace('.png', '')],
+                check=True
             )
 
-        except FileNotFoundError:
-            QMessageBox.critical(self, "Error", "No se encontró 'pdftoppm'.")
-            return None
+            return img_path if os.path.exists(img_path) else None
 
-        return img_path if os.path.exists(img_path) else None
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error generating PDF: {str(e)}")
+            return None
 
     def handleOpen(self):
         pass
