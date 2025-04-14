@@ -1,25 +1,23 @@
-# Base Latex code.
-LATEX_BASE = """\
-\\documentclass[tikz, border=5pt]{{standalone}}
-\\usepackage{{forest}}
+# latex.py
+LATEX_BASE = r"""\documentclass[tikz, border=5pt]{standalone}
+\usepackage{forest}
 
-\\begin{{document}}
+\begin{document}
 {content}
-\\end{{document}}
+\end{document}
 """
-# Base forest code.
-FOREST_BASE = """\
-\\begin{{forest}}
-  for tree={{
-    edge label = {{font=\scriptsize}},
+
+FOREST_BASE = r"""\begin{forest}
+  for tree={
+    edge label = {font=\scriptsize},
     circle,
     draw,
-    if n children=0{{
+    if n children=0{
       rectangle, draw
-    }}{{}}
-  }}
+    }{}
+  }
 {tree_code}
-\\end{{forest}}
+\end{forest}
 """
 
 

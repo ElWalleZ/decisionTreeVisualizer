@@ -225,4 +225,21 @@ class TreeGenerator:
 
     # Algorithm method, overridden in inheritor.
     def algorithm(self):
-        raise NotImplementedError('This method should be overridden with an algorithm implementation.')
+        """
+        Ejemplo de implementación básica para dividir datos.
+        """
+        # Algoritmo de ejemplo: dividir datos en dos partes basado en comparaciones
+        if len(self.data) < 2:
+            return
+
+        pivot = self.data[0]
+        left = []
+        right = []
+
+        for elem in self.data[1:]:
+            if self.comp(pivot, '>', elem):  # Usa el método comp para generar nodos
+                left.append(elem)
+            else:
+                right.append(elem)
+
+        self.data = left + [pivot] + right

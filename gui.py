@@ -11,8 +11,10 @@ from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtWidgets import QHBoxLayout, QMessageBox, QComboBox
 from pathlib import Path
 from sklearn.exceptions import NotFittedError
-
-
+from decision_tree_git_que_puso_el_profe import TreeGenerator
+from decision_tree_git_que_puso_el_profe import Stack
+from decision_tree_git_que_puso_el_profe.extra import Comparison, State
+from decision_tree_git_que_puso_el_profe.latex import LatexTree, LatexNode
 
 from model import entrenar_arbol_decision, guardar_modelo
 from datasets import get_dataset_names, get_dataset, load_custom_dataset
@@ -276,181 +278,108 @@ class Window(QtWidgets.QWidget):
             shutil.copy(img_path, os.path.join(self.project_dir, img_name))
 
     def texto_a_latex(self, texto_arbol):
-        """
-        Convierte el árbol de decisión en texto a formato LaTeX usando forest
-        con escape de caracteres especiales
-        """
 
-        def escape_latex_special_chars(text):
-            """
-            Escapa todos los caracteres especiales de LaTeX y normaliza el texto
-            """
-            # Reemplaza caracteres problemáticos
-            replacements = {
-                '_': r'\_',
-                '&': r'\&',
-                '%': r'\%',
-                '$': r'\$',
-                '#': r'\#',
-                '{': r'\{',
-                '}': r'\}',
-                '~': r'\textasciitilde{}',
-                '^': r'\textasciicircum{}',
-                '\\': r'\textbackslash{}',
-                '[': r'{[}',
-                ']': r'{]}',
-                '|': r'\textbar{}',
-                '<': r'\textless{}',
-                '>': r'\textgreater{}',
-                '/': r'/\allowbreak'  # Para evitar problemas con paths
-            }
+        lineas = [linea for linea in texto_arbol.split("\n") if linea.strip() != ""]
+        stack = []  # Para rastrear nodos padres
+        root_node = None
 
-            for char, replacement in replacements.items():
-                text = text.replace(char, replacement)
+        for linea in lineas:
+            nivel = linea.count("|   ")  # Determina la profundidad
+            linea_limpia = linea.replace("|---", "").strip()
 
-            # Normaliza texto a ASCII básico
-            text = text.encode('ascii', 'ignore').decode('ascii')
-
-            return text
-
-        def convertir_a_forest(qtree_text):
-            lines = qtree_text.strip().split('\n')
-            forest_tree = []
-            indent_level = 0
-
-            for line in lines:
-                if not line.strip():
-                    continue
-
-                current_indent = len(line) - len(line.lstrip())
-                current_level = current_indent // 4
-
-                # Limpieza profunda de la línea
-                clean_line = escape_latex_special_chars(line.strip())
-                clean_line = clean_line.replace('|---', '→')  # Usa flecha en lugar de pipes
-
-                # Manejo de nodos
-                if '<=' in clean_line:
-                    parts = clean_line.split('<=')
-                    node_content = f"{parts[0].strip()} ≤ {parts[1].strip()}"
-                elif '>' in clean_line:
-                    parts = clean_line.split('>')
-                    node_content = f"{parts[0].strip()} > {parts[1].strip()}"
-                elif clean_line.startswith('class:'):
-                    node_content = f"Clase: {clean_line.split(':')[1].strip()}"
+            # Manejar nodos de decisión y hojas
+            if "class: " in linea_limpia:  # Nodo hoja
+                clase = linea_limpia.split("class: ")[1]
+                comp = Comparison("Clase", "==", clase)
+                is_leaf = True
+            else:  # Nodo de decisión
+                if "<=" in linea_limpia:
+                    feature, valor = linea_limpia.split(" <= ")
+                    comp = Comparison(feature, "<=", valor)
+                elif ">" in linea_limpia:
+                    feature, valor = linea_limpia.split(" > ")
+                    comp = Comparison(feature, ">", valor)
                 else:
-                    node_content = clean_line
+                    continue  # Saltar líneas no reconocidas
+                is_leaf = False
 
-                # Construcción de la estructura forest
-                if current_level > indent_level:
-                    forest_tree.append(f"[{node_content}")
-                elif current_level < indent_level:
-                    forest_tree.append("]" * (indent_level - current_level))
-                    forest_tree.append(f"[{node_content}")
+            # Crear nodo LaTeX
+            node = LatexNode(
+                val=str(comp),
+                is_leaf=is_leaf,
+                is_left=True  # Asumir izquierda por defecto
+            )
+
+            # Manejar jerarquía
+            while len(stack) > nivel:
+                stack.pop()
+
+            if not stack:  # Nodo raíz
+                root_node = node
+            else:
+                parent = stack[-1]
+                if parent.left is None:
+                    parent.left = node
                 else:
-                    if forest_tree and not forest_tree[-1].startswith("]"):
-                        forest_tree.append("]")
-                    forest_tree.append(f"[{node_content}")
+                    parent.right = node
 
-                indent_level = current_level
+            stack.append(node)
 
-            return " ".join(forest_tree) + "]" * (indent_level + 1)
-
-        forest_code = convertir_a_forest(texto_arbol)
-
-        return  r"""\documentclass{article}
-            \usepackage[edges]{forest}
-            \usepackage[utf8]{inputenc}
-            \usepackage[T1]{fontenc}  % Soporte mejorado para caracteres
-            \usepackage[paperwidth=20cm, paperheight=15cm, margin=1cm]{geometry}
-            \usepackage{amsmath}  % Para símbolos matemáticos
-            \usepackage{textcomp}  % Símbolos adicionales
-            
-            \pagestyle{empty}
-            \begin{document}
-            \begin{forest}
-            for tree={
-                grow'=east,
-                parent anchor=east,
-                child anchor=west,
-                edge path={
-                    \noexpand\path[\forestoption{edge}]
-                    (!u.parent anchor) -- +(5pt,0) |- (.child anchor)\forestoption{edge label};
-                },
-                font=\ttfamily\small,  % Usar fuente monoespaciada
-                l sep=20pt,
-                s sep=8pt,
-                inner sep=2pt,
-                where n children=0{
-                    font=\itshape\small,
-                    tier=terminal
-                }{}
-            }
-            """ + forest_code + r"""
-            \end{forest}
-            \end{document}"""
+        latex_tree = LatexTree()
+        latex_tree.root = root_node
+        return latex_tree.render()
 
     def generar_pdf_y_imagen(self, tex_code, output_dir="output_arbol", nombre="arbol"):
-        """
-        Genera un archivo PDF y una imagen PNG a partir de código LaTeX.
 
-        Args:
-            tex_code (str): Código LaTeX para generar el árbol.
-            output_dir (str): Directorio de salida para los archivos generados.
-            nombre (str): Nombre base para los archivos generados.
-
-        Returns:
-            str: Ruta absoluta de la imagen generada o None si falla.
-        """
         os.makedirs(output_dir, exist_ok=True)
+
         tex_path = os.path.join(output_dir, f"{nombre}.tex")
         pdf_path = os.path.join(output_dir, f"{nombre}.pdf")
         img_path = os.path.join(output_dir, f"{nombre}.png")
 
-        # Guardar el código LaTeX en un archivo .tex
         with open(tex_path, "w", encoding="utf-8") as f:
             f.write(tex_code)
 
-        # Ejecutar pdflatex para generar el PDF
+        # Ejecutar pdflatex y capturar salida
+
         try:
-            subprocess.run(
-                ["pdflatex", "-interaction=nonstopmode", "-output-directory", output_dir, tex_path],
-                check=True,
-                timeout=30
+
+            result = subprocess.run(
+                ["pdflatex", "-interaction=nonstopmode", f"{nombre}.tex"],  # <-- SOLO EL NOMBRE DEL ARCHIVO
+                cwd=output_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=10,
+
             )
+
+            if result.returncode != 0 or not os.path.exists(pdf_path):
+                log = result.stdout.decode(errors="ignore")
+                QMessageBox.critical(self, "Error de LaTeX", f"No se pudo compilar el archivo .tex:\n\n{log[:1000]}")
+                return None
         except FileNotFoundError:
-            QMessageBox.critical(self, "Error", "No se encontró pdflatex. Asegúrate de que esté instalado.")
+            QMessageBox.critical(self, "Error", "No se encontró 'pdflatex'.")
             return None
         except subprocess.TimeoutExpired:
-            QMessageBox.critical(self, "Error", "La generación del PDF tomó demasiado tiempo.")
-            return None
-        except subprocess.CalledProcessError as e:
-            QMessageBox.critical(self, "Error", f"Error al generar el PDF: {str(e)}")
+
+            QMessageBox.critical(self, "Error", "La compilación excedió el tiempo límite.")
+
             return None
 
-        # Convertir el PDF a una imagen PNG
+        # Convertir PDF a imagen
         try:
             subprocess.run(
-                ["convert", "-density", "300", pdf_path, img_path],
-                check=True,
-                timeout=30
+                ["pdftoppm", pdf_path, os.path.join(output_dir, nombre), "-png", "-singlefile"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=10
             )
+
         except FileNotFoundError:
-            QMessageBox.critical(self, "Error", "No se encontró ImageMagick (convert). Asegúrate de que esté instalado.")
-            return None
-        except subprocess.TimeoutExpired:
-            QMessageBox.critical(self, "Error", "La conversión del PDF a imagen tomó demasiado tiempo.")
-            return None
-        except subprocess.CalledProcessError as e:
-            QMessageBox.critical(self, "Error", f"Error al convertir el PDF a imagen: {str(e)}")
+            QMessageBox.critical(self, "Error", "No se encontró 'pdftoppm'.")
             return None
 
-        # Verificar si la imagen fue generada correctamente
-        if os.path.exists(img_path):
-            return os.path.abspath(img_path)
-        else:
-            QMessageBox.critical(self, "Error", "No se pudo generar la imagen.")
-            return None
+        return img_path if os.path.exists(img_path) else None
 
     def handleOpen(self):
         pass
