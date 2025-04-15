@@ -1,24 +1,57 @@
 import subprocess
 import sys
 import os
-from datetime import datetime
-import json
 import shutil
 
 import numpy as np
 from PyQt6 import QtWidgets, QtGui
 from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtWidgets import QHBoxLayout, QMessageBox, QComboBox, QLabel, QPushButton
-from decision_tree_git_que_puso_el_profe import TreeConverter
+from PyQt6.uic.properties import QtCore
+from PyQt6 import QtCore
+
+from treeMaker import TreeConverter
 
 from model import entrenar_arbol_decision
 from datasets import get_dataset_names, get_dataset, load_custom_dataset
 
 
-class MiEtiqueta(QtWidgets.QLabel):
+class MiEtiqueta(QtWidgets.QScrollArea):
     def __init__(self):
         super().__init__()
-        self.setStyleSheet("border: 1px solid black;")
+        self.setWidgetResizable(True)  # Cambiado a True para mejor ajuste
+        self.image_label = QtWidgets.QLabel()
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setWidget(self.image_label)
+        self.setStyleSheet("border: 1px solid black; background-color: white;")
+
+    def set_image(self, pixmap):
+        self.image_label.setPixmap(pixmap)
+        self.image_label.adjustSize()
+
+        self.drag_start = None
+        self.setMouseTracking(True)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_start = event.pos()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.drag_start is not None:
+            delta = self.drag_start - event.pos()
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() + delta.x())
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() + delta.y())
+            self.drag_start = event.pos()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self.drag_start = None
+        super().mouseReleaseEvent(event)
+
+    def set_image(self, pixmap):
+        self.image_label.setPixmap(pixmap)
+        self.image_label.adjustSize()
 
 
 class Window(QtWidgets.QWidget):
@@ -26,13 +59,12 @@ class Window(QtWidgets.QWidget):
         super().__init__()
         self.current_dataset = None
         self._path = None
-        self.current_project = "Sin nombre"
+        self.current_project = "Project"
         self.project_dir = None
         self.current_dataset_name = ""
         self.modelo = None
         self.center()
 
-        # Configuración inicial de la interfaz
         self.init_ui()
 
     def center(self):
@@ -42,48 +74,33 @@ class Window(QtWidgets.QWidget):
         self.move(qr.topLeft())
 
     def init_ui(self):
-        # Widget principal para mostrar información
         self.viewer = QtWidgets.QTextEdit()
         self.viewer.setReadOnly(True)
         self.viewer.setStyleSheet("border: 1px solid black; font-size: 14px;")
-        self.viewer.setFixedSize(840, 680)
+        self.viewer.setLineWrapMode(QtWidgets.QTextEdit.LineWrapMode.WidgetWidth)
+        self.viewer.setWordWrapMode(QtGui.QTextOption.WrapMode.WordWrap)
 
-        # Widget para mostrar imágenes (no usado actualmente)
         self.viewer2 = MiEtiqueta()
-        self.viewer2.setFixedSize(840, 680)
-        self.viewer2.setScaledContents(True)
 
         self.lbl_project = QtWidgets.QLabel("Proyecto: Sin nombre")
-        self.btn_rename_project = QtWidgets.QPushButton("Cambiar nombre")
-        self.btn_rename_project.clicked.connect(self.rename_project)
 
         self.btn_entrenar = QtWidgets.QPushButton("Entrenar Árbol de Decisión")
         self.btn_entrenar.clicked.connect(self.entrenar_modelo)
         self.btn_entrenar.setMinimumSize(QSize(200, 50))
 
-        project_layout = QHBoxLayout()
-        project_layout.addWidget(self.lbl_project)
-        project_layout.addWidget(self.btn_rename_project)
-
-        # Controles para datasets
         self.dataset_combo = QComboBox()
         self.dataset_combo.addItems(['Seleccionar dataset'] + get_dataset_names())
         self.dataset_combo.currentIndexChanged.connect(self.load_selected_dataset)
         self.dataset_combo.setMinimumSize(QSize(200, 50))
 
-
         self.btn_custom_dataset = QtWidgets.QPushButton("Cargar dataset personalizado")
         self.btn_custom_dataset.clicked.connect(self.load_custom_dataset)
         self.btn_custom_dataset.setMinimumSize(QSize(200, 50))
 
-
-        #self.buttonOpen = QtWidgets.QPushButton("Abrir archivo")
-        #self.buttonOpen.setMinimumSize(QSize(200, 50))
-
         self.depthValue = QtWidgets.QSpinBox()
         self.depthValue.setValue(5)
         self.depthValue.setMinimum(1)
-        self.depthValue.setMaximum(10)
+        self.depthValue.setMaximum(100)
         self.depthValue.setFixedSize(70,40)
 
         self.btn_new_project = QPushButton("Nuevo Proyecto")
@@ -91,10 +108,11 @@ class Window(QtWidgets.QWidget):
         self.btn_new_project.setMinimumSize(QSize(200, 50))
 
 
-        # Layout principal
         layout = QtWidgets.QGridLayout(self)
 
-        # Sección de datasets
+        layout.setColumnStretch(0, 1)
+        layout.setColumnStretch(1, 2)
+
         dataset_layout = QHBoxLayout()
         dataset_layout.addWidget(self.dataset_combo)
         dataset_layout.addWidget(self.btn_custom_dataset)
@@ -108,16 +126,31 @@ class Window(QtWidgets.QWidget):
         button_layout.addWidget(self.btn_new_project)
         button_layout.addWidget(self.btn_entrenar)
 
-        # Ensamblado final
-        layout.addLayout(project_layout, 0, 0, 1, 4)
-        layout.addLayout(dataset_layout, 0, 0, 1, 4)
-        layout.addLayout(button_layout, 1, 0, 1, 4)
-        layout.addWidget(self.viewer, 2, 0, 1, 1)
-        layout.addWidget(self.viewer2, 2, 2, 1, 1)
+        layout.addLayout(dataset_layout, 0, 0, 1, 2)  # Ocupa ambas columnas
+        layout.addLayout(button_layout, 1, 0, 1, 2)  # Ocupa ambas columnas
+        layout.addWidget(self.viewer, 2, 0)  # Columna izquierda
+        layout.addWidget(self.viewer2, 2, 1)  # Columna derecha
+
+        # Configura políticas de tamaño
+        self.viewer.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.Expanding
+        )
+        self.viewer2.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding
+        )
+
+        # Tamaños mínimos/máximos
+        self.viewer.setMinimumSize(440, 680)
+        self.viewer2.setMinimumSize(840, 680)
+
+        self.setMinimumSize(1800, 840)
+        self.setWindowTitle("Dataset Manager")
 
 
         self.setWindowTitle("Dataset Manager")
-        self.setMinimumSize(1200, 800)
+        self.setMinimumSize(1800, 840)
 
     def rename_project(self):
         new_name, ok = QtWidgets.QInputDialog.getText(
@@ -141,14 +174,15 @@ class Window(QtWidgets.QWidget):
 
     def load_selected_dataset(self, index):
         if index > 0:
-            self.current_dataset_name = self.dataset_combo.currentText()
-            if self.current_project == "Sin nombre":
+            if self.current_project == "Project":
                 self.rename_project()
-                if self.current_project == "Sin nombre":  # Si canceló
+                if self.current_project == "Project":
+                    self.dataset_combo.setCurrentIndex(0)
                     return
 
             dataset_name = self.dataset_combo.itemText(index)
             if dataset := get_dataset(dataset_name):
+                self.current_dataset_name = dataset_name
                 self.current_dataset = dataset
                 self.show_dataset_info(dataset)
                 QMessageBox.information(self, "Dataset cargado",
@@ -159,34 +193,12 @@ class Window(QtWidgets.QWidget):
     def save_dataset_to_project(self):
         if self.current_dataset and self.project_dir:
             try:
-                # Crear metadata segura
-                metadata = {
-                    'proyecto': self.current_project,
-                    'dataset_type': 'scikit-learn',
-                    'dataset_name': self.current_dataset_name,
-                    'fecha': datetime.now().isoformat(),
-                    'features': self.current_dataset.data.shape[1],
-                    'samples': self.current_dataset.data.shape[0]
-                }
-
-                # Si es dataset personalizado, añadir info extra
                 if hasattr(self.current_dataset, 'filename'):
-                    metadata.update({
-                        'dataset_type': 'custom',
-                        'original_file': os.path.basename(self.current_dataset.filename)
-                    })
-
-                    # Verificar existencia real del archivo antes de copiar
                     if os.path.isfile(self.current_dataset.filename):
                         shutil.copy(self.current_dataset.filename, self.project_dir)
                     else:
                         QMessageBox.warning(self, "Advertencia",
                                             f"Archivo original no encontrado: {self.current_dataset.filename}")
-
-                # Guardar metadata siempre
-                with open(os.path.join(self.project_dir, 'metadata.json'), 'w') as f:
-                    json.dump(metadata, f, indent=4)
-
             except Exception as e:
                 QMessageBox.critical(self, "Error",
                                      f"Error guardando proyecto:\n{str(e)}")
@@ -197,6 +209,12 @@ class Window(QtWidgets.QWidget):
 
         if path:
             try:
+                if self.current_project == "Project":
+                    self.rename_project()
+                    if self.current_project == "Project":
+                        self.dataset_combo.setCurrentIndex(0)
+                        return
+
                 self.current_dataset = load_custom_dataset(path)
                 self.current_dataset_name = os.path.splitext(os.path.basename(path))[0]
                 self.show_dataset_info(self.current_dataset)
@@ -206,7 +224,6 @@ class Window(QtWidgets.QWidget):
                 QMessageBox.critical(self, "Error", f"Error cargando dataset: {str(e)}")
 
     def show_dataset_info(self, dataset):
-        # Obtener información de manera segura
         safe_get = lambda attr, default: getattr(dataset, attr, default) if hasattr(dataset, attr) else default
 
         info = f"""
@@ -224,12 +241,11 @@ class Window(QtWidgets.QWidget):
 
         Archivo: {safe_get('filename', 'Dataset integrado')}
         """
-        info += f"\nAcciones disponibles:\n- Clases: {len(np.unique(dataset.target))} (apto para clasificación)"
+        info += f"\nAcciones disponibles:\n- Clases: {len(np.unique(dataset.target))}"
 
         self.viewer.setPlainText(info)
 
     def closeEvent(self, event):
-        # Guardar automáticamente al cerrar
         if self.current_project != "Sin nombre":
             self.save_dataset_to_project()
         super().closeEvent(event)
@@ -239,11 +255,15 @@ class Window(QtWidgets.QWidget):
             QMessageBox.warning(self, "Error", "Primero selecciona un dataset")
             return
 
+        if self.current_project == "Project":
+            QMessageBox.warning(self, "Error", "Debes asignar un nombre al proyecto antes de entrenar")
+            self.rename_project()
+            if self.current_project == "Project":
+                return
+
         try:
-            # 1. Entrenar modelo
             resultado = entrenar_arbol_decision(self.current_dataset, max_depth= self.depthValue.value())
 
-            # 2. Mostrar texto del árbol
             texto_limpio = resultado['texto_arbol'].replace('_', '')
             mensaje = f"""=== Resultados del Modelo ===
                 Tipo: {resultado['tipo'].capitalize()}
@@ -254,21 +274,17 @@ class Window(QtWidgets.QWidget):
                 """
             self.viewer.setPlainText(mensaje)
 
-            # 3. Generar y mostrar árbol visual (DIRECTO CON TreeConverter)
             output_dir = os.path.join(self.project_dir, "output") if self.project_dir else "output"
             os.makedirs(output_dir, exist_ok=True)
 
-            # Convertir a PDF
-            pdf_path = TreeConverter.convert_to_pdf(
+            pdf_path = TreeConverter.convert_to_pdf( #convertir a PDF
                 texto_limpio,
                 output_dir=output_dir,
                 filename="decision_tree"
             )
 
-            # Convertir PDF a imagen
-            img_path = pdf_path.replace('.pdf', '.png')
+            img_path = pdf_path.replace('.pdf', '.png') #PDF a imagen
             try:
-                # Opción 1: Usar pdftoppm (más confiable)
                 subprocess.run([
                     "pdftoppm",
                     "-png",
@@ -277,12 +293,10 @@ class Window(QtWidgets.QWidget):
                     os.path.join(output_dir, "temp_tree")
                 ], check=True, capture_output=True)
 
-                # Renombrar el archivo generado
                 temp_img = os.path.join(output_dir, "temp_tree.png")
                 if os.path.exists(temp_img):
                     os.rename(temp_img, img_path)
 
-                # Opción 2: Si falla, usar convert (ImageMagick)
                 if not os.path.exists(img_path):
                     subprocess.run([
                         "convert",
@@ -301,13 +315,9 @@ class Window(QtWidgets.QWidget):
                 QMessageBox.warning(self, "Advertencia", error_msg)
                 return
 
-            # 4. Guardar resultados
             if self.project_dir:
-                #guardar_modelo(resultado['modelo'], self.project_dir)
                 with open(os.path.join(self.project_dir, 'arbol.txt'), 'w') as f:
                     f.write(texto_limpio)
-                if img_path:
-                    shutil.copy(img_path, self.project_dir)
 
             self.mostrar_imagen_arbol(img_path)
             QMessageBox.information(self, "Éxito", "Modelo entrenado y visualizado!")
@@ -319,9 +329,22 @@ class Window(QtWidgets.QWidget):
             QMessageBox.critical(self, "Error", error_msg)
 
     def mostrar_imagen_arbol(self, img_path):
-        pixmap = QtGui.QPixmap(img_path)
-        scaled_pixmap = pixmap.scaled(self.viewer2.size(), Qt.AspectRatioMode.KeepAspectRatio)
-        self.viewer2.setPixmap(scaled_pixmap)
+        if not img_path or not os.path.exists(img_path):
+            self.viewer2.clear()
+            return
+
+        try:
+            pixmap = QtGui.QPixmap(img_path)
+            if pixmap.isNull():
+                self.viewer2.clear()
+                return
+
+            # Mostrar la imagen en tamaño original
+            self.viewer2.set_image(pixmap)
+
+        except Exception as e:
+            print(f"Error al mostrar imagen: {str(e)}")
+            self.viewer2.clear()
 
     def nuevo_proyecto(self):
         new_name, ok = QtWidgets.QInputDialog.getText(
@@ -331,19 +354,16 @@ class Window(QtWidgets.QWidget):
         )
 
         if ok and new_name:
-            # Resetear todos los valores del proyecto actual
             self.current_project = new_name.strip()
             self.current_dataset = None
             self.current_dataset_name = ""
             self.modelo = None
 
-            # Actualizar UI
             self.lbl_project.setText(f"Proyecto: {self.current_project}")
             self.dataset_combo.setCurrentIndex(0)
             self.viewer.clear()
             self.viewer2.clear()
 
-            # Crear directorio
             self.create_project_directory()
 
             QMessageBox.information(
