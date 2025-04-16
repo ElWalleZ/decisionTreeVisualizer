@@ -44,6 +44,9 @@ def load_custom_dataset(file_path, target_column=-1):
             target_column = data.columns[target_column]
 
         target = data[target_column].values
+
+        unique_classes = np.unique(target)
+        target_names = [f"Class_{cls}" for cls in unique_classes]  # O usar str(cls)
         features = data.drop(columns=[target_column]).values
 
         # Generar nombres de características si no existen
@@ -54,7 +57,7 @@ def load_custom_dataset(file_path, target_column=-1):
             data=features,
             target=target,
             feature_names=feature_names,
-            target_names=[str(target_column)],
+            target_names=target_names,
             DESCR=f"Custom dataset from {file_path}",
             filename=file_path
         )

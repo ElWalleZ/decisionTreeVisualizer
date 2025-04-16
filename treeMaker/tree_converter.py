@@ -27,16 +27,22 @@ class TreeConverter:
 
     @staticmethod
     def parse_sklearn_tree(tree_text: str) -> TreeNode:
-        """Parser corregido que no pierde nodos hoja iniciales"""
+        """Parser que elimina la indentación y guiones"""
         lines = [line for line in tree_text.split('\n') if "|---" in line]
         stack = []
         root = None
 
         for line in lines:
-            # Contar nivel basado en la indentación
-            level = line.count('|   ')
-            content = line.replace("|---", "").strip()
+            # Limpiar toda la indentación y guiones
+            clean_line = re.sub(r'^[|\s]+', '', line)  # Eliminar pipes y espacios iniciales
+            content = re.sub(r'^---\s*', '', clean_line).strip()  # Quitar el "---"
             is_leaf = "class: " in content.lower()
+
+            # Crear nodo
+            node = TreeNode(content=content, is_leaf=is_leaf)
+
+            # Calcular nivel basado en la indentación original
+            level = len(re.findall(r'\|   ', line))  # La indentación original usa "|   "
 
             # Crear nodo (sin limpiar contenido para debug)
             node = TreeNode(

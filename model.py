@@ -33,7 +33,13 @@ def entrenar_arbol_decision(dataset, max_depth, test_size=0.3):
     fnames = getattr(dataset, 'feature_names', [f"X{i}" for i in range(X.shape[1])])
     export_kwargs = dict(feature_names=fnames)
     if es_clasificacion:
-        export_kwargs['class_names'] = getattr(dataset, 'target_names', [str(c) for c in modelo.classes_])
+        # Verificar que target_names coincida con las clases
+        unique_classes = np.unique(y)
+        if len(dataset.target_names) != len(unique_classes):
+            # Generar nombres automáticos si hay discrepancia
+            export_kwargs['class_names'] = [str(cls) for cls in unique_classes]
+        else:
+            export_kwargs['class_names'] = dataset.target_names
     texto_arbol = export_text(modelo, **export_kwargs)
 
     return {
