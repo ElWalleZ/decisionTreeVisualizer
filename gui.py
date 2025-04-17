@@ -2,30 +2,38 @@ import subprocess
 import sys
 import os
 import shutil
-
 import numpy as np
+
 from PyQt6 import QtWidgets, QtGui
 from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtWidgets import QHBoxLayout, QMessageBox, QComboBox, QLabel, QPushButton
-from PyQt6.uic.properties import QtCore
-from PyQt6 import QtCore
-
 from treeMaker import TreeConverter
-
 from model import entrenar_arbol_decision
 from datasets import get_dataset_names, get_dataset, load_custom_dataset
 
 
 class MiEtiqueta(QtWidgets.QScrollArea):
+    """
+    Widget personalizado para mostrar y navegar imágenes con scroll.
+
+    Hereda de QScrollArea y contiene un QLabel para mostrar imágenes.
+    Soporta arrastre del mouse para navegar por imágenes grandes.
+    """
     def __init__(self):
         super().__init__()
-        self.setWidgetResizable(True)  # Cambiado a True para mejor ajuste
+        self.setWidgetResizable(True)
         self.image_label = QtWidgets.QLabel()
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setWidget(self.image_label)
         self.setStyleSheet("border: 1px solid black; background-color: white;")
 
     def set_image(self, pixmap):
+        """
+        Establece la imagen a mostrar en el widget.
+
+        Args:
+            pixmap (QPixmap): Imagen a mostrar.
+        """
         self.image_label.setPixmap(pixmap)
         self.image_label.adjustSize()
 
@@ -49,12 +57,16 @@ class MiEtiqueta(QtWidgets.QScrollArea):
         self.drag_start = None
         super().mouseReleaseEvent(event)
 
-    def set_image(self, pixmap):
-        self.image_label.setPixmap(pixmap)
-        self.image_label.adjustSize()
-
-
 class Window(QtWidgets.QWidget):
+    """
+    Ventana principal de la aplicación de gestión de datasets y árboles de decisión.
+
+    Proporciona interfaz para:
+    - Cargar datasets (integrados o personalizados)
+    - Entrenar modelos de árbol de decisión
+    - Visualizar resultados y árboles de decisión
+    - Gestionar proyectos
+    """
     def __init__(self):
         super().__init__()
         self.current_dataset = None
@@ -100,13 +112,12 @@ class Window(QtWidgets.QWidget):
         self.depthValue = QtWidgets.QSpinBox()
         self.depthValue.setValue(5)
         self.depthValue.setMinimum(1)
-        self.depthValue.setMaximum(100)
+        self.depthValue.setMaximum(10)
         self.depthValue.setFixedSize(70,40)
 
         self.btn_new_project = QPushButton("Nuevo Proyecto")
         self.btn_new_project.clicked.connect(self.nuevo_proyecto)
         self.btn_new_project.setMinimumSize(QSize(200, 50))
-
 
         layout = QtWidgets.QGridLayout(self)
 
@@ -131,7 +142,6 @@ class Window(QtWidgets.QWidget):
         layout.addWidget(self.viewer, 2, 0)  # Columna izquierda
         layout.addWidget(self.viewer2, 2, 1)  # Columna derecha
 
-        # Configura políticas de tamaño
         self.viewer.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Preferred,
             QtWidgets.QSizePolicy.Policy.Expanding
@@ -141,18 +151,14 @@ class Window(QtWidgets.QWidget):
             QtWidgets.QSizePolicy.Policy.Expanding
         )
 
-        # Tamaños mínimos/máximos
         self.viewer.setMinimumSize(440, 680)
         self.viewer2.setMinimumSize(840, 680)
 
         self.setMinimumSize(1800, 840)
         self.setWindowTitle("Dataset Manager")
 
-
-        self.setWindowTitle("Dataset Manager")
-        self.setMinimumSize(1800, 840)
-
     def rename_project(self):
+        """Solicita nuevo nombre para el proyecto actual."""
         new_name, ok = QtWidgets.QInputDialog.getText(
             self,
             "Nombre del Proyecto",
@@ -166,13 +172,20 @@ class Window(QtWidgets.QWidget):
             self.create_project_directory()
 
     def create_project_directory(self):
-        if self.current_project and self.current_project != "Sin nombre":
+        """Crea directorio para el proyecto actual si no existe."""
+        if self.current_project and self.current_project != "Project":
             self.project_dir = os.path.join(os.getcwd(), "proyectos", self.current_project)
             os.makedirs(self.project_dir, exist_ok=True)
         else:
             self.project_dir = None
 
     def load_selected_dataset(self, index):
+        """
+        Carga el dataset seleccionado en el combobox.
+
+        Args:
+            index (int): Índice del item seleccionado en el combobox.
+        """
         if index > 0:
             if self.current_project == "Project":
                 self.rename_project()
@@ -191,6 +204,7 @@ class Window(QtWidgets.QWidget):
             self.save_dataset_to_project()
 
     def save_dataset_to_project(self):
+        """Guarda el dataset actua (si no pertenece a los predeterminados) en el directorio del proyecto."""
         if self.current_dataset and self.project_dir:
             try:
                 if hasattr(self.current_dataset, 'filename'):
@@ -204,6 +218,12 @@ class Window(QtWidgets.QWidget):
                                      f"Error guardando proyecto:\n{str(e)}")
 
     def load_custom_dataset(self):
+        """
+        Carga el dataset seleccionado en el combobox.
+
+        Args:
+            index (int): Índice del item seleccionado en el combobox.
+        """
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, "Cargar dataset personalizado", "", "CSV Files (*.csv)")
 
@@ -224,13 +244,19 @@ class Window(QtWidgets.QWidget):
                 QMessageBox.critical(self, "Error", f"Error cargando dataset: {str(e)}")
 
     def show_dataset_info(self, dataset):
+        """
+        Muestra información detallada del dataset cargado.
+
+        Args:
+            dataset (Bunch): Dataset a mostrar.
+        """
         safe_get = lambda attr, default: getattr(dataset, attr, default) if hasattr(dataset, attr) else default
 
         info = f"""
         === Proyecto: {self.current_project} ===
 
         Dataset: {self.current_dataset_name}
-        Tipo: {safe_get('dataset_type', 'scikit-learn')}
+        Tipo: {safe_get('dataset_type', 'Propio')}
 
         Muestras: {dataset.data.shape[0]}
         Características: {dataset.data.shape[1]}
@@ -251,6 +277,15 @@ class Window(QtWidgets.QWidget):
         super().closeEvent(event)
 
     def entrenar_modelo(self):
+        """
+        Entrena un modelo de árbol de decisión con el dataset actual.
+
+        Realiza:
+        - Entrenamiento del modelo
+        - Generación de visualización
+        - Conversión a PDF/PNG
+        - Muestra resultados
+        """
         if not self.current_dataset:
             QMessageBox.warning(self, "Error", "Primero selecciona un dataset")
             return
@@ -325,10 +360,16 @@ class Window(QtWidgets.QWidget):
         except Exception as e:
             error_msg = str(e)
             if "LaTeX" in error_msg:
-                error_msg += "\n\nAsegúrate de tener instalados:\nsudo apt-get install texlive-latex-extra poppler-utils"
+                error_msg += "\n\nAsegúrate de tener instalados:\nsudo apt-get install texlive-full texlive-latex-extra poppler-utils"
             QMessageBox.critical(self, "Error", error_msg)
 
     def mostrar_imagen_arbol(self, img_path):
+        """
+        Muestra la imagen del árbol de decisión en el visor.
+
+        Args:
+            img_path (str): Ruta al archivo de imagen.
+        """
         if not img_path or not os.path.exists(img_path):
             self.viewer2.clear()
             return
@@ -339,7 +380,6 @@ class Window(QtWidgets.QWidget):
                 self.viewer2.clear()
                 return
 
-            # Mostrar la imagen en tamaño original
             self.viewer2.set_image(pixmap)
 
         except Exception as e:
@@ -347,6 +387,7 @@ class Window(QtWidgets.QWidget):
             self.viewer2.clear()
 
     def nuevo_proyecto(self):
+        """Crea un nuevo proyecto, reiniciando el estado de la aplicación."""
         new_name, ok = QtWidgets.QInputDialog.getText(
             self,
             "Nuevo Proyecto",

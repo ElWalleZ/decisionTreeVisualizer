@@ -6,6 +6,14 @@ from typing import Optional
 
 @dataclass
 class TreeNode:
+    """
+    Representa un nodo en un árbol binario.
+    Atributos:
+    content (str): Contenido del nodo.
+    left (Optional[TreeNode]): Hijo izquierdo.
+    right (Optional[TreeNode]): Hijo derecho.
+    is_leaf (bool): Indica si el nodo es una hoja.
+    """
     content: str
     left: Optional['TreeNode'] = None
     right: Optional['TreeNode'] = None
@@ -15,50 +23,53 @@ class TreeNode:
 class TreeConverter:
     @staticmethod
     def clean_content(content: str) -> str:
-        """Limpia y formatea el contenido para LaTeX"""
+        """
+        Limpia y formatea el contenido para LaTeX.
+        Args:
+        content (str): Texto a limpiar.
+        Returns:
+        str: Contenido formateado para LaTeX.
+        """
         content = content.replace("_", r"\_")
         content = content.replace("<=", r" $\leq$ ").replace(">", r" $>$ ")
         content = re.sub(r"\s+", " ", content).strip()
 
-        # Formato especial para nodos hoja
         if "class: " in content.lower():
             content = r"\textbf{" + content.replace("class: ", "").strip() + "}"
         return content
 
     @staticmethod
     def parse_sklearn_tree(tree_text: str) -> TreeNode:
-        """Parser que elimina la indentación y guiones"""
+        """
+        Parsea texto de árbol de scikit-learn a estructura TreeNode.
+        Args:
+        tree_text (str): Texto del árbol de scikit-learn.
+        Returns:
+        TreeNode: Raíz del árbol parseado.
+        """
         lines = [line for line in tree_text.split('\n') if "|---" in line]
         stack = []
         root = None
 
         for line in lines:
-            # Limpiar toda la indentación y guiones
-            clean_line = re.sub(r'^[|\s]+', '', line)  # Eliminar pipes y espacios iniciales
-            content = re.sub(r'^---\s*', '', clean_line).strip()  # Quitar el "---"
+            clean_line = re.sub(r'^[|\s]+', '', line)
+            content = re.sub(r'^---\s*', '', clean_line).strip()
             is_leaf = "class: " in content.lower()
 
-            # Crear nodo
-            node = TreeNode(content=content, is_leaf=is_leaf)
+            level = len(re.findall(r'\|   ', line))
 
-            # Calcular nivel basado en la indentación original
-            level = len(re.findall(r'\|   ', line))  # La indentación original usa "|   "
-
-            # Crear nodo (sin limpiar contenido para debug)
             node = TreeNode(
-                content=content,  # Usamos el contenido crudo primero
+                content=content,
                 is_leaf=is_leaf
             )
 
-            # Manejar niveles
             while len(stack) > level:
                 stack.pop()
 
             if not stack:
                 if root is None:
-                    root = node  # Primer nodo raíz
+                    root = node
                 else:
-                    # Caso especial: hermano del root (raro pero posible)
                     root.right = node
             else:
                 parent = stack[-1]
@@ -69,8 +80,8 @@ class TreeConverter:
 
             stack.append(node)
 
-        # Ahora limpiar el contenido de todos los nodos
         def clean_node(node):
+            """Manda a limpiar el contenido de los nodos"""
             if node:
                 node.content = TreeConverter.clean_content(node.content)
                 clean_node(node.left)
@@ -81,8 +92,13 @@ class TreeConverter:
 
     @staticmethod
     def to_vertical_forest(tree: TreeNode) -> str:
-        """Genera árbol vertical con mejor espaciado"""
-
+        """
+        Genera código LaTeX para visualizar el árbol con el paquete forest.
+        Args:
+        tree (TreeNode): Raíz del árbol a convertir.
+        Returns:
+        str: Código LaTeX completo para el árbol.
+        """
         def build_branches(node: TreeNode) -> str:
             if node is None:
                 return ""
@@ -133,7 +149,15 @@ class TreeConverter:
 
     @staticmethod
     def convert_to_pdf(tree_text: str, output_dir: str, filename: str) -> str:
-        """Conversión completa a PDF con manejo de errores"""
+        """
+        Convierte texto de árbol scikit-learn a PDF.
+        Args:
+        tree_text (str): Texto del árbol.
+        output_dir (str): Directorio de salida.
+        filename (str): Nombre base del archivo.
+        Returns:
+        str: Ruta al archivo PDF generado.
+        """
         try:
 
             print("\n=== TEXTO ORIGINAL DEL ÁRBOL ===")
@@ -145,7 +169,6 @@ class TreeConverter:
             print("\n=== ESTRUCTURA DEL ÁRBOL ANALIZADA ===")
             TreeConverter.print_tree_debug(tree)
 
-            # Guardar archivo .tex
             os.makedirs(output_dir, exist_ok=True)
             tex_path = os.path.join(output_dir, f"{filename}.tex")
 
@@ -153,7 +176,7 @@ class TreeConverter:
                 f.write(latex_code)
 
             # Compilar
-            for _ in range(2):  # Compilar 2 veces para referencias
+            for _ in range(2):
                 result = subprocess.run(
                     ["pdflatex", "-interaction=nonstopmode", tex_path],
                     cwd=output_dir,
@@ -170,7 +193,12 @@ class TreeConverter:
 
     @staticmethod
     def print_tree_debug(tree: TreeNode, level: int = 0):
-        """Muestra el árbol con estructura jerárquica en consola"""
+        """
+        Muestra el árbol en consola con formato legible.
+        Args:
+        tree (TreeNode): Raíz del árbol a mostrar.
+        level (int): Nivel de indentación.
+        """
         indent = "    " * level
         if tree.is_leaf:
             print(f"{indent}└── [Hoja]: {tree.content.replace('\\textbf{', '').replace('}', '')}")
